@@ -1052,8 +1052,36 @@ __FrontendWaitForStateChange(
     LARGE_INTEGER           Timeout;
     XenbusState             Old = *State;
     NTSTATUS                status;
+    PCHAR                   Buffer;
 
     Trace("%s: ====> (%s)\n", Path, XenbusStateName(*State));
+
+    /*
+     * In case of iPXE boot the fronent is already initialized
+     * and there will be no event that changes it so we just compare
+     * the current value with the old.
+     */
+
+    status = STORE(Read,
+                   Frontend->StoreInterface,
+                   NULL,
+                   Path,
+                   "state",
+                   &Buffer);
+    if (!NT_SUCCESS(status)) {
+        if (status != STATUS_OBJECT_NAME_NOT_FOUND)
+            goto fail1;
+
+        *State = XenbusStateUnknown;
+    } else {
+        *State = (XenbusState)strtol(Buffer, NULL, 10);
+
+        STORE(Free,
+              Frontend->StoreInterface,
+              Buffer);
+    }
+    if (*State != Old)
+        return STATUS_SUCCESS;
 
     KeInitializeEvent(&Event, NotificationEvent, FALSE);
 
@@ -1073,7 +1101,6 @@ __FrontendWaitForStateChange(
 
     while (*State == Old && TimeDelta < 120000) {
         ULONG           Attempt;
-        PCHAR           Buffer;
         LARGE_INTEGER   Now;
 
         Attempt = 0;
@@ -1258,6 +1285,15 @@ __FrontendPrepare(
     Frontend->StoreInterface = __FrontendGetStoreInterface(Frontend);
 
     STORE(Acquire, Frontend->StoreInterface);
+
+    /* Simple debug message via XenStore */
+    (VOID) STORE(Printf,
+                 Frontend->StoreInterface,
+                 NULL,
+                 __FrontendGetPath(Frontend),
+                 "preparing",
+                 "%u",
+                 1);
 
     status = STORE(Read,
                    Frontend->StoreInterface,
